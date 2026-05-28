@@ -6,11 +6,11 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from pandastable import Table, TableModel
+from pandastable import Table
 import re
 import os
 
-# ================== CUSTOM STOPWORDS & FUNCTIONS ==================
+# ================== CUSTOM STOPWORDS ==================
 CUSTOM_STOPWORDS = {
     'http', 'https', 'www', 'com', 'org', 'net', 'html', 'htm', 'asp', 'aspx', 'jsp',
     'index', 'default', 'home', 'main', 'page',
@@ -46,8 +46,6 @@ def parse_apache_log(log_content, filename):
                 method = request[0]
                 uri = request[1]
                 query = uri.split('?', 1)[1] if '?' in uri else ''
-                url_path = uri.split('?')[0]
-
                 logs.append({
                     'ip': match.group('ip'),
                     'timestamp': match.group('time'),
@@ -80,70 +78,63 @@ def extract_features(df):
     df['xss_score'] = df['full_uri_lower'].str.count(xss_patterns)
     return df
 
+
 # ================== TKINTER GUI ==================
 class WebAttackDetectorApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Web Attack Detector - Tkinter GUI")
-        self.root.geometry("1200x700")
+        self.root.geometry("1350x780")
 
         self.df_features = None
         self.sqli_df = None
         self.xss_df = None
+        self.normal_df = None
         self.selected_files = []
 
         self.create_widgets()
 
     def create_widgets(self):
-        # === Top Frame ===
         top_frame = ttk.Frame(self.root, padding=10)
         top_frame.pack(fill=tk.X)
 
-        ttk.Button(top_frame, text="📁 Pilih File Log", command=self.select_files).pack(side=tk.LEFT, padx=5)
-        ttk.Button(top_frame, text="🚀 Proses Data", command=self.process_data).pack(side=tk.LEFT, padx=5)
-        ttk.Button(top_frame, text="🗑️ Reset", command=self.reset_app).pack(side=tk.LEFT, padx=5)
+        ttk.Button(top_frame, text="📁 Pilih File Log", command=self.select_files, width=22).pack(side=tk.LEFT, padx=5)
+        ttk.Button(top_frame, text="🚀 Proses Data", command=self.process_data, width=20).pack(side=tk.LEFT, padx=5)
+        ttk.Button(top_frame, text="🗑️ Reset", command=self.reset_app, width=15).pack(side=tk.LEFT, padx=5)
 
-        self.file_label = ttk.Label(top_frame, text="Belum ada file dipilih")
+        self.file_label = ttk.Label(top_frame, text="Belum ada file dipilih", font=("Arial", 10))
         self.file_label.pack(side=tk.LEFT, padx=20)
 
-        # === Notebook (Tabs) ===
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # Tab 1: Ringkasan
         self.tab_summary = ttk.Frame(self.notebook)
+        self.tab_sqli    = ttk.Frame(self.notebook)
+        self.tab_xss     = ttk.Frame(self.notebook)
+        self.tab_normal  = ttk.Frame(self.notebook)
+        self.tab_all     = ttk.Frame(self.notebook)
+        self.tab_viz     = ttk.Frame(self.notebook)
+
         self.notebook.add(self.tab_summary, text="Ringkasan")
-
-        # Tab 2: SQL Injection
-        self.tab_sqli = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_sqli, text="SQL Injection")
-
-        # Tab 3: XSS
-        self.tab_xss = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_xss, text="XSS")
-
-        # Tab 4: Semua Data
-        self.tab_all = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_all, text="Semua Data + Cluster")
-
-        # Tab 5: Visualisasi
-        self.tab_viz = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_viz, text="Visualisasi")
-
-        # Placeholder labels
-        ttk.Label(self.tab_summary, text="Klik tombol 'Proses Data' untuk melihat hasil", font=("Arial", 12)).pack(pady=50)
-        ttk.Label(self.tab_sqli, text="Data SQL Injection akan muncul di sini", font=("Arial", 12)).pack(pady=50)
-        ttk.Label(self.tab_xss, text="Data XSS akan muncul di sini", font=("Arial", 12)).pack(pady=50)
-        ttk.Label(self.tab_all, text="Semua data + cluster akan muncul di sini", font=("Arial", 12)).pack(pady=50)
+        self.notebook.add(self.tab_sqli,    text="SQL Injection")
+        self.notebook.add(self.tab_xss,     text="XSS")
+        self.notebook.add(self.tab_normal,  text="Traffic Normal")
+        self.notebook.add(self.tab_all,     text="Semua Data + Cluster")
+        self.notebook.add(self.tab_viz,     text="Visualisasi")
 
     def select_files(self):
-        files = filedialog.askopenfilenames(
-            title="Pilih File Log",
-            filetypes=[("Text files", "*.txt *.log"), ("All files", "*.*")]
-        )
-        if files:
-            self.selected_files = list(files)
-            self.file_label.config(text=f"{len(files)} file dipilih")
+        try:
+            files = filedialog.askopenfilenames(
+                title="Pilih File Log",
+                filetypes=[("Log Files", "*.txt *.log"), ("All Files", "*.*")]
+            )
+            if files:
+                self.selected_files = list(files)
+                self.file_label.config(text=f"{len(files)} file dipilih")
+            else:
+                print("User membatalkan pemilihan file.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Terjadi kesalahan saat memilih file:\n{str(e)}")
 
     def process_data(self):
         if not self.selected_files:
@@ -169,7 +160,6 @@ class WebAttackDetectorApp:
         df_logs = pd.concat(all_logs, ignore_index=True)
         self.df_features = extract_features(df_logs)
 
-        # K-Means
         feature_cols = ['url_length', 'query_length', 'special_chars', 'param_count',
                         'sql_score', 'xss_score', 'status', 'cleaned_url_length', 'cleaned_token_count']
         X = self.df_features[feature_cols].fillna(0)
@@ -186,42 +176,45 @@ class WebAttackDetectorApp:
 
         self.sqli_df = self.df_features[self.df_features['sql_score'] > 0].sort_values(by='anomaly_score', ascending=False)
         self.xss_df = self.df_features[self.df_features['xss_score'] > 0].sort_values(by='anomaly_score', ascending=False)
+        self.normal_df = self.df_features[(self.df_features['sql_score'] == 0) & (self.df_features['xss_score'] == 0)]
 
         self.update_all_tabs()
-        messagebox.showinfo("Sukses", f"Berhasil memproses {len(self.df_features)} baris data!")
+        messagebox.showinfo("Sukses", f"Berhasil memproses {len(self.df_features):,} baris data!")
 
     def update_all_tabs(self):
-        # Clear old widgets
-        for widget in self.tab_summary.winfo_children():
-            widget.destroy()
-        for widget in self.tab_sqli.winfo_children():
-            widget.destroy()
-        for widget in self.tab_xss.winfo_children():
-            widget.destroy()
-        for widget in self.tab_all.winfo_children():
-            widget.destroy()
-        for widget in self.tab_viz.winfo_children():
-            widget.destroy()
+        for tab in [self.tab_summary, self.tab_sqli, self.tab_xss, self.tab_normal, self.tab_all, self.tab_viz]:
+            for widget in tab.winfo_children():
+                widget.destroy()
 
         # Ringkasan
-        ttk.Label(self.tab_summary, text=f"Total Log: {len(self.df_features)}", font=("Arial", 14, "bold")).pack(pady=10)
-        ttk.Label(self.tab_summary, text=f"SQL Injection Terdeteksi: {len(self.sqli_df)}", font=("Arial", 12)).pack()
-        ttk.Label(self.tab_summary, text=f"XSS Terdeteksi: {len(self.xss_df)}", font=("Arial", 12)).pack()
-        ttk.Label(self.tab_summary, text=f"Anomaly: {self.df_features['is_anomaly'].sum()}", font=("Arial", 12)).pack()
+        ttk.Label(self.tab_summary, text="📊 RINGKASAN HASIL ANALISIS", font=("Arial", 16, "bold")).pack(pady=15)
+        ttk.Label(self.tab_summary, text=f"Total Log yang Diproses     : {len(self.df_features):,}", font=("Arial", 12)).pack(pady=3)
+        ttk.Label(self.tab_summary, text=f"SQL Injection Terdeteksi    : {len(self.sqli_df):,}", font=("Arial", 12), foreground="red").pack(pady=3)
+        ttk.Label(self.tab_summary, text=f"XSS Terdeteksi              : {len(self.xss_df):,}", font=("Arial", 12), foreground="orange").pack(pady=3)
+        ttk.Label(self.tab_summary, text=f"Traffic Normal (Aman)       : {len(self.normal_df):,}", font=("Arial", 12), foreground="green").pack(pady=3)
+        ttk.Label(self.tab_summary, text=f"Anomaly Terdeteksi          : {self.df_features['is_anomaly'].sum():,}", font=("Arial", 12)).pack(pady=3)
 
-        # SQL Injection Table
+        # SQL Injection
         if len(self.sqli_df) > 0:
             self.create_pandastable(self.tab_sqli, self.sqli_df)
         else:
-            ttk.Label(self.tab_sqli, text="Tidak ada SQL Injection terdeteksi").pack(pady=50)
+            ttk.Label(self.tab_sqli, text="Tidak ada data SQL Injection yang terdeteksi.", font=("Arial", 12)).pack(pady=50)
 
-        # XSS Table
+        # XSS
         if len(self.xss_df) > 0:
             self.create_pandastable(self.tab_xss, self.xss_df)
         else:
-            ttk.Label(self.tab_xss, text="Tidak ada XSS terdeteksi").pack(pady=50)
+            ttk.Label(self.tab_xss, text="Tidak ada data XSS yang terdeteksi.", font=("Arial", 12)).pack(pady=50)
 
-        # All Data
+        # Traffic Normal
+        if len(self.normal_df) > 0:
+            ttk.Label(self.tab_normal, text=f"Traffic Normal / Aman: {len(self.normal_df):,} record",
+                      font=("Arial", 12, "bold"), foreground="green").pack(pady=8)
+            self.create_pandastable(self.tab_normal, self.normal_df)
+        else:
+            ttk.Label(self.tab_normal, text="Tidak ada traffic normal.", font=("Arial", 12)).pack(pady=50)
+
+        # Semua Data
         self.create_pandastable(self.tab_all, self.df_features)
 
         # Visualisasi
@@ -230,7 +223,6 @@ class WebAttackDetectorApp:
     def create_pandastable(self, parent, dataframe):
         frame = ttk.Frame(parent)
         frame.pack(fill=tk.BOTH, expand=True)
-
         pt = Table(frame, dataframe=dataframe, showtoolbar=True, showstatusbar=True)
         pt.show()
 
@@ -238,24 +230,24 @@ class WebAttackDetectorApp:
         frame = ttk.Frame(self.tab_viz)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        # Elbow Plot
-        fig, ax = plt.subplots(figsize=(8, 4))
-        inertias = []
+        fig, ax = plt.subplots(figsize=(9, 5))
         feature_cols = ['url_length', 'query_length', 'special_chars', 'param_count',
                         'sql_score', 'xss_score', 'status', 'cleaned_url_length', 'cleaned_token_count']
         X = self.df_features[feature_cols].fillna(0)
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
 
+        inertias = []
         for k in range(1, 11):
             km = KMeans(n_clusters=k, random_state=42, n_init=10)
             km.fit(X_scaled)
             inertias.append(km.inertia_)
 
-        ax.plot(range(1, 11), inertias, marker='o')
-        ax.set_title("Elbow Method")
+        ax.plot(range(1, 11), inertias, marker='o', color='blue')
+        ax.set_title("Elbow Method - Menentukan Jumlah Cluster Optimal", fontsize=12)
         ax.set_xlabel("Jumlah Cluster (K)")
-        ax.set_ylabel("Inertia")
+        ax.set_ylabel("Inertia (WCSS)")
+        ax.grid(True)
 
         canvas = FigureCanvasTkAgg(fig, master=frame)
         canvas.draw()
@@ -265,27 +257,22 @@ class WebAttackDetectorApp:
         self.df_features = None
         self.sqli_df = None
         self.xss_df = None
+        self.normal_df = None
         self.selected_files = []
         self.file_label.config(text="Belum ada file dipilih")
 
-        for widget in self.tab_summary.winfo_children():
-            widget.destroy()
-        for widget in self.tab_sqli.winfo_children():
-            widget.destroy()
-        for widget in self.tab_xss.winfo_children():
-            widget.destroy()
-        for widget in self.tab_all.winfo_children():
-            widget.destroy()
-        for widget in self.tab_viz.winfo_children():
-            widget.destroy()
+        for tab in [self.tab_summary, self.tab_sqli, self.tab_xss, self.tab_normal, self.tab_all, self.tab_viz]:
+            for widget in tab.winfo_children():
+                widget.destroy()
 
-        ttk.Label(self.tab_summary, text="Klik tombol 'Proses Data' untuk melihat hasil", font=("Arial", 12)).pack(pady=50)
-        ttk.Label(self.tab_sqli, text="Data SQL Injection akan muncul di sini", font=("Arial", 12)).pack(pady=50)
-        ttk.Label(self.tab_xss, text="Data XSS akan muncul di sini", font=("Arial", 12)).pack(pady=50)
-        ttk.Label(self.tab_all, text="Semua data + cluster akan muncul di sini", font=("Arial", 12)).pack(pady=50)
+        ttk.Label(self.tab_summary, text="Klik tombol 'Proses Data' untuk melihat hasil.", font=("Arial", 12)).pack(pady=50)
+        ttk.Label(self.tab_sqli, text="Data SQL Injection akan muncul di sini.", font=("Arial", 12)).pack(pady=50)
+        ttk.Label(self.tab_xss, text="Data XSS akan muncul di sini.", font=("Arial", 12)).pack(pady=50)
+        ttk.Label(self.tab_normal, text="Data Traffic Normal akan muncul di sini.", font=("Arial", 12)).pack(pady=50)
+        ttk.Label(self.tab_all, text="Semua data akan muncul di sini.", font=("Arial", 12)).pack(pady=50)
 
 
-# ================== RUN APP ==================
+# ================== JALANKAN PROGRAM ==================
 if __name__ == "__main__":
     root = tk.Tk()
     app = WebAttackDetectorApp(root)
